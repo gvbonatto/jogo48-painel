@@ -7,7 +7,7 @@
 <title>Jogo de 48 · Painel</title>
 <!--
   Painel online do terminal "Jogo de 48".
-  Fala com o terminal ESP32-P4 por MQTT (broker publico, TLS) e cifra tudo
+  Fala com o terminal ESP32-P4 por MQTT (broker publico shiftr.io, TLS) e cifra tudo
   com AES-256-GCM usando o codigo do painel mostrado na tela do terminal
   (Operador > Online). Sem o codigo ninguem le nem comanda a maquina.
 -->
@@ -212,7 +212,7 @@
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 "use strict";
-const BROKER = "wss://broker.hivemq.com:8884/mqtt";
+const BROKER = "wss://public.cloud.shiftr.io";   // login publico; conteudo cifrado ponta a ponta
 const $ = (id) => document.getElementById(id);
 const S = { key: null, base: null, cli: null, estado: null, estadoEm: 0, config: null, hist: [], vivo: null, pend: {} };
 
@@ -255,7 +255,7 @@ async function decifra(txt) {
 // ----------------------- Conexao -----------------------
 function conecta() {
   const id = "painel-" + Math.random().toString(16).slice(2, 10);
-  S.cli = mqtt.connect(BROKER, { clientId: id, clean: true, reconnectPeriod: 3000, connectTimeout: 10000 });
+  S.cli = mqtt.connect(BROKER, { clientId: id, username: "public", password: "public", clean: true, reconnectPeriod: 3000, connectTimeout: 10000 });
   S.cli.on("connect", () => {
     marcaServidor(true);
     S.cli.subscribe(S.base + "/#", { qos: 1 });
