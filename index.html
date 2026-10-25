@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B1220">
+<title>Jogo de 48 · Painel</title>
+<!--
+  Painel online do terminal "Jogo de 48".
+  Fala com o terminal ESP32-P4 por MQTT (broker publico, TLS) e cifra tudo
+  com AES-256-GCM usando o codigo do painel mostrado na tela do terminal
+  (Operador > Online). Sem o codigo ninguem le nem comanda a maquina.
+-->
+<style>
+  :root {
+    --fundo: #0B1220; --fundo2: #101C36; --cartao: #141E35; --cartao2: #1D2945; --borda: #2A3756;
+    --texto: #EAF0F8; --suave: #8C9DBA; --verde: #22C55E; --verde-esc: #052E16; --ciano: #38BDF8;
+    --ambar: #F59E0B; --ambar-esc: #3B2503; --vermelho: #EF4444; --raio: 18px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: linear-gradient(180deg, var(--fundo), var(--fundo2)) fixed; color: var(--texto);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; min-height: 100%; }
+  body { padding: 0 16px 40px; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: 0; letter-spacing: .01em; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; color: var(--suave); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 0; border-radius: 14px; padding: 12px 18px; font-weight: 700; background: var(--cartao2); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.verde { background: var(--verde); color: var(--verde-esc); }
+  button.ambar { background: var(--ambar); color: var(--ambar-esc); }
+  button.ciano { background: var(--ciano); color: #062033; }
+  button.perigo { background: transparent; color: var(--vermelho); border: 2px solid var(--vermelho); }
+  button.fantasma { background: transparent; color: var(--suave); border: 1px solid var(--borda); }
+  input { background: var(--fundo); border: 1px solid var(--borda); border-radius: 12px; padding: 11px 12px; width: 100%; }
+  input:focus { outline: 2px solid var(--verde); outline-offset: 1px; }
+  .topo { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 14px 0; background: linear-gradient(180deg, var(--fundo) 70%, transparent); }
+  .topo .marca { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+  .logo { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--verde-esc);
+    border: 2px solid var(--verde); color: var(--verde); font-weight: 800; }
+  .pilula { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 99px; font-size: .85rem;
+    font-weight: 600; background: var(--cartao2); color: var(--suave); white-space: nowrap; }
+  .pilula::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pilula.ok { color: var(--verde); background: rgba(34,197,94,.12); }
+  .pilula.alerta { color: var(--ambar); background: rgba(245,158,11,.12); }
+  .pilula.erro { color: var(--vermelho); background: rgba(239,68,68,.12); }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); padding: 18px; margin-bottom: 16px; }
+  .linha { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .suave { color: var(--suave); }
+  .pequeno { font-size: .85rem; }
+  .oculto { display: none !important; }
+  /* Jogo */
+  .jogo { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .estado-jogo { font-size: 1rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .relogio { font-size: clamp(3.4rem, 15vw, 5.4rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; }
+  .barra { height: 12px; border-radius: 99px; background: var(--cartao2); overflow: hidden; }
+  .barra > div { height: 100%; width: 0; background: var(--verde); border-radius: 99px; transition: width .9s linear, background .3s; }
+  .aviso { border-radius: 14px; padding: 12px 14px; font-weight: 600; }
+  .aviso.erro { background: rgba(239,68,68,.12); border: 1px solid var(--vermelho); }
+  .aviso.ambar { background: rgba(245,158,11,.10); border: 1px solid var(--ambar); }
+  .opcoes button { flex: 1 1 110px; padding: 16px 10px; }
+  .opcoes button small { display: block; font-weight: 600; opacity: .8; }
+  /* Pagamento pendente */
+  .pendente { border-color: var(--ambar); background: linear-gradient(180deg, rgba(245,158,11,.10), var(--cartao)); }
+  .valor { font-size: 2.2rem; font-weight: 800; color: var(--verde); }
+  /* Vendas */
+  .numeros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .numeros div { background: var(--cartao2); border-radius: 14px; padding: 12px; }
+  .numeros b { display: block; font-size: 1.35rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  td, th { padding: 9px 6px; border-bottom: 1px solid var(--borda); text-align: left; }
+  th { color: var(--suave); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+  .etiqueta { padding: 2px 9px; border-radius: 99px; font-size: .78rem; font-weight: 700; }
+  .etiqueta.pix { background: rgba(34,197,94,.15); color: var(--verde); }
+  .etiqueta.gratis { background: rgba(245,158,11,.15); color: var(--ambar); }
+  .etiqueta.remota { background: rgba(56,189,248,.15); color: var(--ciano); }
+  /* Config */
+  .campo { display: grid; gap: 6px; }
+  .campo label { color: var(--suave); font-size: .9rem; }
+  .op-linha { display: grid; grid-template-columns: 70px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .alterna { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .alterna button.ativo.gratis { background: var(--ambar); color: var(--ambar-esc); }
+  .alterna button.ativo.pix { background: var(--verde); color: var(--verde-esc); }
+  /* Login */
+  .login { max-width: 440px; margin: 12vh auto 0; text-align: center; }
+  .login input { text-align: center; font-size: 1.25rem; letter-spacing: .12em; text-transform: uppercase; margin: 16px 0 10px; }
+  .login button { width: 100%; padding: 15px; }
+  /* Aviso flutuante */
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px); transition: transform .25s;
+    background: var(--cartao2); border: 1px solid var(--borda); border-radius: 14px; padding: 12px 18px; font-weight: 600;
+    max-width: calc(100% - 32px); z-index: 20; }
+  #toast.mostra { transform: translateX(-50%) translateY(0); }
+  #toast.ok { border-color: var(--verde); }
+  #toast.erro { border-color: var(--vermelho); }
+  @media (min-width: 640px) { .jogo { grid-template-columns: 1.2fr 1fr; align-items: center; } }
+</style>
+</head>
+<body>
+<main>
+  <!-- ======================= Login ======================= -->
+  <section id="telaLogin" class="login">
+    <div class="logo" style="margin:0 auto 14px;width:64px;height:64px;font-size:1.4rem">48</div>
+    <h1>Painel do Jogo de 48</h1>
+    <p class="suave">Digite o código do painel que aparece no terminal em<br><b>Operador › Online</b>.</p>
+    <input id="codigo" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="19">
+    <label class="suave pequeno"><input id="lembrar" type="checkbox" style="width:auto;margin-right:6px" checked>Lembrar neste aparelho</label>
+    <p><button id="entrar" class="verde">Entrar</button></p>
+    <p id="erroLogin" class="pequeno" style="color:var(--vermelho)"></p>
+  </section>
+
+  <!-- ======================= Painel ======================= -->
+  <section id="telaPainel" class="oculto">
+    <header class="topo">
+      <div class="marca"><div class="logo">48</div><div><h1>Jogo de 48</h1><span id="visto" class="suave pequeno">aguardando o terminal...</span></div></div>
+      <span id="pServidor" class="pilula alerta">Servidor</span>
+      <span id="pTerminal" class="pilula">Terminal</span>
+    </header>
+
+    <!-- Pagamento esperando confirmacao -->
+    <section id="cPendente" class="cartao pendente oculto">
+      <h2 id="pendTitulo">Cliente aguardando o Pix</h2>
+      <div class="linha" style="justify-content:space-between">
+        <div><div id="pendValor" class="valor">R$ 0,00</div><div id="pendDesc" class="suave"></div></div>
+        <div class="suave pequeno" style="text-align:right">expira em<br><b id="pendExpira" style="font-size:1.4rem;color:var(--texto)">--:--</b></div>
+      </div>
+      <p id="pendDica" class="pequeno suave">Confira no app do banco se o Pix com esse valor chegou antes de confirmar.</p>
+      <div class="linha">
+        <button id="btnConfirmar" class="verde" style="flex:2">Confirmar recebimento</button>
+        <button id="btnCancelarPag" class="fantasma" style="flex:1">Cancelar</button>
+      </div>
+    </section>
+
+    <!-- Jogo -->
+    <section class="cartao">
+      <h2>Máquina</h2>
+      <div class="jogo">
+        <div>
+          <div id="estadoJogo" class="estado-jogo suave">—</div>
+          <div id="relogio" class="relogio">--:--</div>
+          <div class="barra" style="margin-top:12px"><div id="barra"></div></div>
+          <p id="infoJogo" class="suave pequeno" style="margin:8px 0 0"></p>
+        </div>
+        <div class="grade" style="grid-template-columns:1fr">
+          <div id="avisoRs" class="aviso erro oculto">Sem comunicação com o ESP32 do jogo. O tempo fica congelado até voltar.</div>
+          <div id="acoesJogo" class="linha">
+            <button id="btnPausa" class="ambar" style="flex:1">Pausar</button>
+            <button id="btnEncerrar" class="perigo" style="flex:1">Encerrar</button>
+          </div>
+        </div>
+      </div>
+      <h2 id="tituloLiberar" style="margin-top:18px">Liberar jogo</h2>
+      <div id="opcoes" class="linha opcoes"></div>
+      <div class="linha" style="margin-top:10px">
+        <input id="minLivre" type="number" min="1" max="360" placeholder="Outro tempo (min)" style="flex:1;min-width:140px">
+        <button id="btnLivre" class="ciano">Liberar</button>
+      </div>
+      <p class="suave pequeno" style="margin-bottom:0">Liberação pelo painel não cobra nada: ela entra nas vendas como "painel".</p>
+    </section>
+
+    <!-- Vendas -->
+    <section class="cartao">
+      <h2>Vendas</h2>
+      <div class="numeros">
+        <div><span class="suave pequeno">Pix</span><b id="nPix">0</b><span id="vPix" class="suave pequeno">R$ 0,00</span></div>
+        <div><span class="suave pequeno">Grátis (teste)</span><b id="nGratis">0</b></div>
+        <div><span class="suave pequeno">Tempo liberado</span><b id="nTempo">0 min</b></div>
+      </div>
+      <table><thead><tr><th>Quando</th><th>Tipo</th><th>Tempo</th><th>Valor</th></tr></thead><tbody id="historico"></tbody></table>
+      <p id="semHist" class="suave pequeno">Nenhuma venda ainda.</p>
+    </section>
+
+    <!-- Configuracao -->
+    <section class="cartao">
+      <h2>Configuração</h2>
+      <div class="campo"><label>Modo de venda</label>
+        <div class="alterna"><button id="mGratis" class="gratis">Grátis (teste)</button><button id="mPix" class="pix">Pix</button></div></div>
+      <p class="suave pequeno" id="infoPix"></p>
+      <div class="campo" style="margin-top:6px"><label>Opções de tempo (0 min = desligada)</label>
+        <div id="cfgOpcoes"></div></div>
+      <div class="grade" style="margin-top:8px">
+        <div class="campo"><label>Pausa</label><select id="cfgPausaOn" style="background:var(--fundo);border:1px solid var(--borda);border-radius:12px;padding:11px"><option value="1">Permitida</option><option value="0">Desligada</option></select></div>
+        <div class="campo"><label>Duração máx. da pausa (min)</label><input id="cfgPausaMax" type="number" min="0.5" max="30" step="0.5"></div>
+        <div class="campo"><label>Pausas por jogo</label><input id="cfgPausaN" type="number" min="1" max="10"></div>
+        <div class="campo"><label>Validade do QR (min)</label><input id="cfgQr" type="number" min="1" max="15" step="0.5"></div>
+      </div>
+      <p style="margin-bottom:0"><button id="btnSalvarCfg" class="verde" style="width:100%">Salvar no terminal</button></p>
+    </section>
+
+    <section class="suave pequeno" style="text-align:center">
+      <p id="infoTecnica"></p>
+      <button id="sair" class="fantasma">Sair deste aparelho</button>
+    </section>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+"use strict";
+const BROKER = "wss://broker.emqx.io:8084/mqtt";
+const $ = (id) => document.getElementById(id);
+const S = { key: null, base: null, cli: null, estado: null, estadoEm: 0, config: null, hist: [], vivo: null, pend: {} };
+
+// ----------------------- Util -----------------------
+const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+const mmss = (s) => { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
+const norm = (c) => c.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const b64e = (u8) => { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); };
+const b64d = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+
+let toastTimer;
+function aviso(msg, tipo = "") {
+  const t = $("toast");
+  t.textContent = msg; t.className = "mostra " + tipo;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.className = ""), 3200);
+}
+
+// ----------------------- Criptografia (igual ao terminal) -----------------------
+async function sha256(txt) { return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(txt))); }
+async function derivar(codigo) {
+  const n = norm(codigo);
+  const k = await sha256("j48|chave|" + n), t = await sha256("j48|topico|" + n);
+  S.key = await crypto.subtle.importKey("raw", k, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  S.base = "j48/" + [...t.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function cifra(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, S.key, new TextEncoder().encode(JSON.stringify(obj))));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return b64e(out);
+}
+async function decifra(txt) {
+  const d = b64d(txt);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: d.slice(0, 12) }, S.key, d.slice(12));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// ----------------------- Conexao -----------------------
+function conecta() {
+  const id = "painel-" + Math.random().toString(16).slice(2, 10);
+  S.cli = mqtt.connect(BROKER, { clientId: id, clean: true, reconnectPeriod: 3000, connectTimeout: 10000 });
+  S.cli.on("connect", () => {
+    marcaServidor(true);
+    S.cli.subscribe(S.base + "/#", { qos: 1 });
+    comando("sync", {}, false);
+  });
+  S.cli.on("reconnect", () => marcaServidor(false));
+  S.cli.on("close", () => marcaServidor(false));
+  S.cli.on("message", async (topico, payload) => {
+    const sub = topico.slice(S.base.length + 1), txt = new TextDecoder().decode(payload);
+    if (sub === "vivo") { S.vivo = txt === "1"; desenhaTerminal(); return; }
+    if (sub === "cmd") return;
+    let j;
+    try { j = await decifra(txt); }
+    catch (e) { if (sub === "estado") aviso("Mensagem que não abre com este código. Confira o código do painel.", "erro"); return; }
+    if (sub === "estado") { S.estado = j; S.estadoEm = Date.now(); desenhaEstado(); }
+    else if (sub === "config") { S.config = j; desenhaConfig(); desenhaOpcoes(); }
+    else if (sub === "hist") { S.hist = j.h || []; desenhaHist(); }
+    else if (sub === "evt") {
+      const p = S.pend[j.n];
+      if (p) { delete S.pend[j.n]; aviso(j.msg || (j.ok ? "Feito" : "Não deu certo"), j.ok ? "ok" : "erro"); }
+    }
+  });
+}
+
+async function comando(c, extra = {}, avisar = true) {
+  if (!S.cli || !S.cli.connected) { aviso("Sem conexão com o servidor", "erro"); return; }
+  const n = Math.random().toString(36).slice(2, 10);
+  const msg = Object.assign({ c, t: Date.now(), n }, extra);
+  if (avisar) {
+    S.pend[n] = Date.now();
+    setTimeout(() => { if (S.pend[n]) { delete S.pend[n]; aviso("O terminal não respondeu. Ele está online?", "erro"); } }, 8000);
+  }
+  S.cli.publish(S.base + "/cmd", await cifra(msg), { qos: 1 });
+}
+
+// ----------------------- Desenho -----------------------
+function marcaServidor(ok) {
+  const p = $("pServidor");
+  p.textContent = ok ? "Servidor" : "Conectando...";
+  p.className = "pilula " + (ok ? "ok" : "alerta");
+}
+
+function terminalOnline() {
+  if (!S.estado) return false;
+  if (S.vivo === false) return false;
+  const t = S.estado.t;
+  if (t) return Math.abs(Date.now() - t * 1000) < 35000 || Date.now() - S.estadoEm < 35000;
+  return Date.now() - S.estadoEm < 35000;
+}
+
+function desenhaTerminal() {
+  const on = terminalOnline(), p = $("pTerminal");
+  p.textContent = on ? "Terminal online" : "Terminal offline";
+  p.className = "pilula " + (on ? "ok" : "erro");
+  if (S.estado) {
+    const quando = S.estado.t ? S.estado.t * 1000 : S.estadoEm;
+    const seg = Math.max(0, Math.round((Date.now() - quando) / 1000));
+    $("visto").textContent = on ? (seg < 15 ? "visto agora" : `visto há ${seg} s`) : `visto ${new Date(quando).toLocaleString("pt-BR")}`;
+  }
+}
+
+function restanteAgora() {
+  const e = S.estado;
+  if (!e) return 0;
+  let r = e.jogo.r;
+  if (e.jogo.e === "jogando" && !e.jogo.cg && terminalOnline()) r -= (Date.now() - S.estadoEm) / 1000;
+  return Math.max(0, r);
+}
+
+const NOMES = { livre: "Livre · esperando cliente", jogando: "Jogando", pausada: "Pausado", encerrada: "Tempo esgotado" };
+function desenhaEstado() {
+  const e = S.estado;
+  if (!e) return;
+  const j = e.jogo, emJogo = j.e === "jogando" || j.e === "pausada";
+  desenhaTerminal();
+
+  const est = $("estadoJogo");
+  est.textContent = j.cg ? "Tempo congelado" : NOMES[j.e] || j.e;
+  est.style.color = j.cg ? "var(--vermelho)" : j.e === "jogando" ? "var(--verde)" : j.e === "pausada" ? "var(--ciano)" : "var(--suave)";
+  $("avisoRs").classList.toggle("oculto", e.rs.on);
+  $("acoesJogo").classList.toggle("oculto", !emJogo);
+  $("btnPausa").textContent = j.e === "pausada" ? "Retomar" : j.pr > 0 ? `Pausar (${j.pr})` : "Sem pausas";
+  $("btnPausa").className = j.e === "pausada" ? "ciano" : "ambar";
+  $("btnPausa").disabled = j.e !== "pausada" && !(j.pr > 0);
+  $("tituloLiberar").textContent = emJogo ? "Adicionar tempo" : "Liberar jogo";
+  $("infoJogo").textContent = j.e === "pausada" ? `Volta sozinho em ${mmss(j.pz)}` :
+    emJogo ? `${j.pr} pausa(s) disponível(is)` : "";
+
+  // Pagamento esperando na tela do terminal
+  const pg = e.pag;
+  $("cPendente").classList.toggle("oculto", !pg);
+  if (pg) {
+    $("pendTitulo").textContent = pg.pix ? "Cliente aguardando o Pix" : "Cliente na tela de teste grátis";
+    $("pendValor").textContent = pg.pix ? reais(pg.c) : "R$ 0,00";
+    $("pendDesc").textContent = `${Math.round(pg.s / 60)} min ${pg.ex ? "a mais" : "de jogo"} · txid ${pg.tx}`;
+    $("pendDica").classList.toggle("oculto", !pg.pix);
+    $("btnConfirmar").textContent = pg.pix ? "Confirmar recebimento" : "Liberar grátis";
+    S.pendExpira = Date.now() + pg.x * 1000;
+  }
+
+  $("nPix").textContent = e.vd.pix;
+  $("vPix").textContent = reais(e.vd.cp);
+  $("nGratis").textContent = e.vd.gr;
+  const min = Math.round(e.vd.seg / 60);
+  $("nTempo").textContent = min >= 60 ? `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}` : `${min} min`;
+  $("infoTecnica").textContent = `${e.fw} · ligado há ${Math.round(e.up / 60)} min · Wi-Fi ${e.wifi.rssi} dBm (${e.wifi.ip}) · RS485 ${e.rs.ok} ok / ${e.rs.f} falhas`;
+  tique();
+}
+
+function tique() {
+  const e = S.estado;
+  if (!e) return;
+  const r = restanteAgora();
+  $("relogio").textContent = e.jogo.e === "livre" ? "--:--" : mmss(r);
+  const tot = e.jogo.tot || 1;
+  const barra = $("barra");
+  barra.style.width = (e.jogo.e === "livre" ? 0 : Math.min(100, (r / tot) * 100)) + "%";
+  barra.style.background = e.jogo.cg ? "var(--vermelho)" : e.jogo.e === "pausada" ? "var(--ciano)" : r <= 60 ? "var(--ambar)" : "var(--verde)";
+  if (e.pag) $("pendExpira").textContent = mmss((S.pendExpira - Date.now()) / 1000);
+  desenhaTerminal();
+}
+
+function desenhaOpcoes() {
+  const box = $("opcoes");
+  box.innerHTML = "";
+  (S.config ? S.config.op : []).filter((o) => o[0] > 0).forEach(([m, c]) => {
+    const b = document.createElement("button");
+    b.className = "verde";
+    b.innerHTML = `${m} min<small>${S.config.modo === "pix" ? "vale " + reais(c) : "grátis"}</small>`;
+    b.onclick = () => libera(m);
+    box.appendChild(b);
+  });
+}
+
+function libera(min) {
+  const emJogo = S.estado && (S.estado.jogo.e === "jogando" || S.estado.jogo.e === "pausada");
+  if (!confirm(`${emJogo ? "Adicionar" : "Liberar"} ${min} min sem cobrar?`)) return;
+  comando("liberar", { s: Math.round(min * 60) });
+}
+
+const TIPOS = [["pix", "Pix"], ["gratis", "Grátis"], ["remota", "Painel"]];
+function desenhaHist() {
+  const tb = $("historico");
+  tb.innerHTML = "";
+  $("semHist").classList.toggle("oculto", S.hist.length > 0);
+  for (const [quando, cent, seg, tipo, tx] of S.hist) {
+    const [cls, nome] = TIPOS[tipo] || ["", "?"];
+    const tr = document.createElement("tr");
+    const data = quando ? new Date(quando * 1000).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+    tr.innerHTML = `<td>${data}</td><td><span class="etiqueta ${cls}">${nome}</span></td><td>${Math.round(seg / 60)} min</td><td>${cent ? reais(cent) : "—"}</td>`;
+    tr.title = tx;
+    tb.appendChild(tr);
+  }
+}
+
+let modoEdit = "gratis";
+function pintaModo() {
+  $("mGratis").classList.toggle("ativo", modoEdit === "gratis");
+  $("mPix").classList.toggle("ativo", modoEdit === "pix");
+}
+function desenhaConfig() {
+  const c = S.config;
+  if (!c) return;
+  modoEdit = c.modo;
+  pintaModo();
+  $("infoPix").textContent = `Pix para ${c.nome} · chave ${c.chave} (a chave só muda no terminal).`;
+  const box = $("cfgOpcoes");
+  box.innerHTML = "";
+  c.op.forEach(([m, cent], i) => {
+    const d = document.createElement("div");
+    d.className = "op-linha";
+    d.innerHTML = `<span class="suave">Opção ${i + 1}</span>
+      <input type="number" min="0" max="600" step="5" value="${m}" data-op="${i}" data-k="m" aria-label="Minutos da opção ${i + 1}">
+      <input type="number" min="0" max="1000" step="0.5" value="${(cent / 100).toFixed(2)}" data-op="${i}" data-k="c" aria-label="Preço da opção ${i + 1} em reais">`;
+    box.appendChild(d);
+  });
+  $("cfgPausaOn").value = c.pz.on ? "1" : "0";
+  $("cfgPausaMax").value = c.pz.max / 60;
+  $("cfgPausaN").value = c.pz.n;
+  $("cfgQr").value = c.qr / 60;
+}
+
+function salvaConfig() {
+  if (!S.config) return;
+  const op = S.config.op.map(() => [0, 0]);
+  document.querySelectorAll("#cfgOpcoes input").forEach((inp) => {
+    const i = +inp.dataset.op, v = parseFloat(inp.value) || 0;
+    if (inp.dataset.k === "m") op[i][0] = Math.round(v); else op[i][1] = Math.round(v * 100);
+  });
+  comando("config", {
+    modo: modoEdit, op,
+    pz: { on: $("cfgPausaOn").value === "1", max: Math.round(parseFloat($("cfgPausaMax").value) * 60), n: parseInt($("cfgPausaN").value, 10) },
+    qr: Math.round(parseFloat($("cfgQr").value) * 60),
+  });
+}
+
+// ----------------------- Entrada / acoes -----------------------
+async function entra(codigo, lembrar) {
+  if (norm(codigo).length !== 16) { $("erroLogin").textContent = "O código tem 16 letras e números."; return; }
+  if (!window.crypto || !crypto.subtle) { $("erroLogin").textContent = "Abra o painel por https:// (ou como arquivo no PC)."; return; }
+  if (typeof mqtt === "undefined") { $("erroLogin").textContent = "Não carregou a biblioteca MQTT. Confira a internet."; return; }
+  await derivar(codigo);
+  if (lembrar) lsSet("j48_codigo", norm(codigo));
+  $("telaLogin").classList.add("oculto");
+  $("telaPainel").classList.remove("oculto");
+  conecta();
+}
+
+$("codigo").addEventListener("input", (e) => {
+  const n = norm(e.target.value).slice(0, 16);
+  e.target.value = n.match(/.{1,4}/g)?.join("-") || "";
+});
+$("entrar").onclick = () => entra($("codigo").value, $("lembrar").checked);
+$("codigo").addEventListener("keydown", (e) => { if (e.key === "Enter") $("entrar").click(); });
+$("sair").onclick = () => { lsSet("j48_codigo", null); location.hash = ""; location.reload(); };
+$("btnPausa").onclick = () => comando(S.estado && S.estado.jogo.e === "pausada" ? "retomar" : "pausar");
+$("btnEncerrar").onclick = () => { if (confirm("Encerrar o jogo agora? O tempo que sobrou é perdido.")) comando("encerrar"); };
+$("btnLivre").onclick = () => { const m = parseFloat($("minLivre").value); if (m > 0) libera(m); };
+$("btnConfirmar").onclick = () => {
+  const pg = S.estado && S.estado.pag;
+  if (pg && confirm(pg.pix ? `Confirma que recebeu ${reais(pg.c)} no Pix?` : "Liberar o teste grátis?")) comando("confirmar", { tx: pg.tx });
+};
+$("btnCancelarPag").onclick = () => comando("cancelar");
+$("mGratis").onclick = () => { modoEdit = "gratis"; pintaModo(); };
+$("mPix").onclick = () => { modoEdit = "pix"; pintaModo(); };
+$("btnSalvarCfg").onclick = salvaConfig;
+setInterval(tique, 1000);
+
+// Codigo pela URL (#k=XXXX...) ou lembrado neste aparelho
+const doHash = new URLSearchParams(location.hash.slice(1)).get("k");
+const salvo = doHash || lsGet("j48_codigo");
+if (salvo) { $("codigo").value = norm(salvo).match(/.{1,4}/g).join("-"); entra(salvo, true); }
+</script>
+</body>
+</html>
