@@ -188,6 +188,19 @@
       <p style="margin-bottom:0"><button id="btnSalvarCfg" class="verde" style="width:100%">Salvar no terminal</button></p>
     </section>
 
+    <!-- Mercado Pago -->
+    <section class="cartao">
+      <h2>Mercado Pago · Pix automático</h2>
+      <p id="mpStatus" class="suave" style="margin-top:0"></p>
+      <div class="linha">
+        <input id="mpToken" type="password" placeholder="Cole o Access Token (APP_USR-...)" autocomplete="off" spellcheck="false" style="flex:1;min-width:200px">
+        <button id="btnMp" class="ciano">Enviar</button>
+      </div>
+      <p class="suave pequeno">Pegue em mercadopago.com.br/developers › Suas integrações › Credenciais de produção.
+        O token vai cifrado direto para o terminal e não fica salvo neste aparelho.</p>
+      <button id="btnMpRemover" class="fantasma pequeno">Remover token do terminal</button>
+    </section>
+
     <section class="suave pequeno" style="text-align:center">
       <p id="infoTecnica"></p>
       <button id="sair" class="fantasma">Sair deste aparelho</button>
@@ -335,11 +348,14 @@ function desenhaEstado() {
   const pg = e.pag;
   $("cPendente").classList.toggle("oculto", !pg);
   if (pg) {
-    $("pendTitulo").textContent = pg.pix ? "Cliente aguardando o Pix" : "Cliente na tela de teste grátis";
+    $("pendTitulo").textContent = !pg.pix ? "Cliente na tela de teste grátis" :
+      pg.au ? "Cliente pagando com Pix · confirmação automática" : "Cliente aguardando o Pix";
     $("pendValor").textContent = pg.pix ? reais(pg.c) : "R$ 0,00";
-    $("pendDesc").textContent = `${Math.round(pg.s / 60)} min ${pg.ex ? "a mais" : "de jogo"} · txid ${pg.tx}`;
+    $("pendDesc").textContent = `${Math.round(pg.s / 60)} min ${pg.ex ? "a mais" : "de jogo"} · ref ${pg.tx}`;
     $("pendDica").classList.toggle("oculto", !pg.pix);
-    $("btnConfirmar").textContent = pg.pix ? "Confirmar recebimento" : "Liberar grátis";
+    $("pendDica").textContent = pg.au ? "O Mercado Pago confirma sozinho e o jogo libera na hora. Use o botão só para liberar na mão."
+                                      : "Confira no app do banco se o Pix com esse valor chegou antes de confirmar.";
+    $("btnConfirmar").textContent = !pg.pix ? "Liberar grátis" : pg.au ? "Liberar manualmente" : "Confirmar recebimento";
     S.pendExpira = Date.now() + pg.x * 1000;
   }
 
@@ -408,7 +424,13 @@ function desenhaConfig() {
   if (!c) return;
   modoEdit = c.modo;
   pintaModo();
-  $("infoPix").textContent = `Pix para ${c.nome} · chave ${c.chave} (a chave só muda no terminal).`;
+  $("infoPix").textContent = c.mp ? "Pix pelo Mercado Pago: cada venda gera um QR único e libera sozinho." :
+    `Pix para ${c.nome} · chave ${c.chave}, confirmado pelo operador (a chave só muda no terminal).`;
+  const mp = $("mpStatus");
+  mp.textContent = c.mp ? `Configurado (${c.mp}). O jogo libera sozinho quando o Pix cai.`
+                        : "Não configurado: o Pix usa a chave do terminal e precisa de confirmação manual.";
+  mp.style.color = c.mp ? "var(--verde)" : "var(--suave)";
+  $("btnMpRemover").classList.toggle("oculto", !c.mp);
   const box = $("cfgOpcoes");
   box.innerHTML = "";
   c.op.forEach(([m, cent], i) => {
@@ -469,6 +491,14 @@ $("btnCancelarPag").onclick = () => comando("cancelar");
 $("mGratis").onclick = () => { modoEdit = "gratis"; pintaModo(); };
 $("mPix").onclick = () => { modoEdit = "pix"; pintaModo(); };
 $("btnSalvarCfg").onclick = salvaConfig;
+$("btnMp").onclick = () => {
+  const tk = $("mpToken").value.trim();
+  if (!/^(APP_USR|TEST)-[\w-]{20,}$/.test(tk)) { aviso("O Access Token começa com APP_USR- (produção)", "erro"); return; }
+  if (tk.startsWith("TEST-") && !confirm("Token de TESTE não processa Pix de verdade. Enviar mesmo assim?")) return;
+  comando("mptoken", { tk });
+  $("mpToken").value = "";
+};
+$("btnMpRemover").onclick = () => { if (confirm("Remover o token? O Pix volta a precisar de confirmação manual.")) comando("mptoken", { tk: "" }); };
 setInterval(tique, 1000);
 
 // Codigo pela URL (#k=XXXX...) ou lembrado neste aparelho
