@@ -114,7 +114,8 @@
   <section id="telaPainel" class="oculto">
     <header class="topo">
       <div class="marca"><div class="logo">48</div><div><h1>Jogo de 48</h1><span id="visto" class="suave pequeno">aguardando o terminal...</span></div></div>
-      <span id="pServidor" class="pilula alerta">Servidor</span>
+      <span id="pServidor" class="pilula alerta" title="Canal 1: MQTT (tempo real)">MQTT</span>
+      <span id="pReserva" class="pilula" title="Canal 2: HTTPS (reserva)">HTTPS</span>
       <span id="pTerminal" class="pilula">Terminal</span>
     </header>
 
@@ -185,7 +186,25 @@
         <div class="campo"><label>Pausas por jogo</label><input id="cfgPausaN" type="number" min="1" max="10"></div>
         <div class="campo"><label>Validade do QR (min)</label><input id="cfgQr" type="number" min="1" max="15" step="0.5"></div>
       </div>
-      <p style="margin-bottom:0"><button id="btnSalvarCfg" class="verde" style="width:100%">Salvar no terminal</button></p>
+      <div class="grade" style="margin-top:8px">
+        <div class="campo"><label>Chave Pix (QR sem Mercado Pago)</label><input id="cfgChave" placeholder="em branco = manter" autocomplete="off"></div>
+        <div class="campo"><label>Nome do recebedor</label><input id="cfgNome" maxlength="25"></div>
+        <div class="campo"><label>Cidade</label><input id="cfgCidade" maxlength="15"></div>
+        <div class="campo"><label>Novo PIN do operador</label><input id="cfgPin" type="password" inputmode="numeric" maxlength="6" placeholder="em branco = manter" autocomplete="new-password"></div>
+        <div class="campo"><label>Brilho da tela: <b id="vBrilho"></b></label><input id="cfgBrilho" type="range" min="10" max="100"></div>
+        <div class="campo"><label>Volume do alerta: <b id="vVolume"></b></label><input id="cfgVolume" type="range" min="0" max="100"></div>
+        <div class="campo"><label>ID do escravo Modbus</label><input id="cfgEsc" type="number" min="1" max="247"></div>
+      </div>
+      <div class="campo" style="margin-top:12px"><label>Redes Wi-Fi reserva (o terminal troca sozinho se a principal cair)</label>
+        <p class="suave pequeno" style="margin:0" id="infoRede"></p>
+        <div id="cfgRedes"></div></div>
+      <p id="cfgStatus" class="pequeno" style="margin:12px 0 0"></p>
+      <div class="linha" style="margin-top:10px">
+        <button id="btnSalvarCfg" class="verde" style="flex:2">Salvar no terminal</button>
+        <button id="btnSom" class="fantasma" style="flex:1">Testar alerta</button>
+      </div>
+      <p class="suave pequeno" style="margin-bottom:0">A configuração fica guardada nos dois servidores: se o terminal estiver
+        desligado ou sem internet, ela é aplicada assim que ele voltar (até 12 h pelo canal reserva).</p>
     </section>
 
     <!-- Mercado Pago -->
@@ -214,7 +233,9 @@
 "use strict";
 const BROKER = "wss://public.cloud.shiftr.io";   // login publico; conteudo cifrado ponta a ponta
 const $ = (id) => document.getElementById(id);
-const S = { key: null, base: null, cli: null, estado: null, estadoEm: 0, config: null, hist: [], vivo: null, pend: {} };
+const NTFY = "https://ntfy.sh/";                 // canal 2 (reserva): HTTPS puro, porta 443
+const S = { key: null, base: null, cli: null, estado: null, estadoEm: 0, config: null, hist: [], vivo: null, pend: {},
+            ntfyCmd: "", ntfyEst: "", ntfyUltimo: "", reservaOk: null, cfgEnviada: 0 };
 
 // ----------------------- Util -----------------------
 const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
@@ -238,7 +259,10 @@ async function derivar(codigo) {
   const n = norm(codigo);
   const k = await sha256("j48|chave|" + n), t = await sha256("j48|topico|" + n);
   S.key = await crypto.subtle.importKey("raw", k, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
-  S.base = "j48/" + [...t.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const id = [...t.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  S.base = "j48/" + id;
+  S.ntfyCmd = "j48" + id + "c";
+  S.ntfyEst = "j48" + id + "e";
 }
 async function cifra(obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -270,31 +294,78 @@ function conecta() {
     let j;
     try { j = await decifra(txt); }
     catch (e) { if (sub === "estado") aviso("Mensagem que não abre com este código. Confira o código do painel.", "erro"); return; }
-    if (sub === "estado") { S.estado = j; S.estadoEm = Date.now(); desenhaEstado(); }
-    else if (sub === "config") { S.config = j; desenhaConfig(); desenhaOpcoes(); }
+    if (sub === "estado") recebeEstado(j);
+    else if (sub === "config") recebeConfig(j);
     else if (sub === "hist") { S.hist = j.h || []; desenhaHist(); }
-    else if (sub === "evt") {
-      const p = S.pend[j.n];
-      if (p) { delete S.pend[j.n]; aviso(j.msg || (j.ok ? "Feito" : "Não deu certo"), j.ok ? "ok" : "erro"); }
-    }
+    else if (sub === "evt") recebeResposta(j);
   });
+  pollReserva();
+  setInterval(pollReserva, 15000);
+}
+
+function recebeEstado(j) {
+  if (S.estado && S.estado.t && j.t && j.t < S.estado.t) return;   // o outro canal ja trouxe um mais novo
+  S.estado = j; S.estadoEm = Date.now(); desenhaEstado();
+}
+function recebeConfig(j) {
+  if (S.config && (S.config.v || 0) > (j.v || 0)) return;
+  S.config = j; desenhaConfig(); desenhaOpcoes();
+}
+function recebeResposta(j) {
+  const p = S.pend[j.n];
+  if (p) { delete S.pend[j.n]; aviso(j.msg || (j.ok ? "Feito" : "Não deu certo"), j.ok ? "ok" : "erro"); }
+}
+
+// Canal 2: le o que o terminal publicou no ntfy.sh (estado + config + resposta)
+async function pollReserva() {
+  try {
+    const r = await fetch(`${NTFY}${S.ntfyEst}/json?poll=1&since=${S.ntfyUltimo || "latest"}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    for (const linha of (await r.text()).split("\n")) {
+      if (!linha.trim()) continue;
+      const m = JSON.parse(linha);
+      if (m.event !== "message" || !m.message) continue;
+      S.ntfyUltimo = m.id;
+      let env;
+      try { env = await decifra(m.message); } catch (e) { continue; }
+      if (env.e) recebeEstado(env.e);
+      if (env.c) recebeConfig(env.c);
+      if (env.a) recebeResposta(env.a);
+    }
+    marcaReserva(true);
+  } catch (e) { marcaReserva(false); }
 }
 
 async function comando(c, extra = {}, avisar = true) {
-  if (!S.cli || !S.cli.connected) { aviso("Sem conexão com o servidor", "erro"); return; }
   const n = Math.random().toString(36).slice(2, 10);
   const msg = Object.assign({ c, t: Date.now(), n }, extra);
+  const corpo = await cifra(msg);
+  const mqttOk = S.cli && S.cli.connected;
+  if (mqttOk) S.cli.publish(S.base + "/cmd", corpo, { qos: 1 });
+  let reservaOk = false;
+  // O canal reserva tem cota diaria: "sync" so vai por ele quando o MQTT esta fora
+  if (c !== "sync" || !mqttOk) {
+    try { reservaOk = (await fetch(NTFY + S.ntfyCmd, { method: "POST", body: corpo })).ok; } catch (e) {}
+    marcaReserva(reservaOk);
+  }
+  if (!mqttOk && !reservaOk) { aviso("Sem conexão com os servidores: confira a internet deste aparelho", "erro"); return; }
   if (avisar) {
     S.pend[n] = Date.now();
-    setTimeout(() => { if (S.pend[n]) { delete S.pend[n]; aviso("O terminal não respondeu. Ele está online?", "erro"); } }, 8000);
+    // So pela reserva o terminal confere a cada 15 s: espera mais pela resposta
+    const espera = mqttOk && terminalOnline() ? 9000 : 40000;
+    setTimeout(() => { if (S.pend[n]) { delete S.pend[n]; aviso("Enviado. O terminal ainda não confirmou (offline?): ele aplica quando voltar se for configuração.", "erro"); } }, espera);
   }
-  S.cli.publish(S.base + "/cmd", await cifra(msg), { qos: 1 });
 }
 
 // ----------------------- Desenho -----------------------
+function marcaReserva(ok) {
+  S.reservaOk = ok;
+  const p = $("pReserva");
+  p.className = "pilula " + (ok ? "ok" : "alerta");
+}
 function marcaServidor(ok) {
   const p = $("pServidor");
-  p.textContent = ok ? "Servidor" : "Conectando...";
+  p.textContent = ok ? "MQTT" : "MQTT...";
   p.className = "pilula " + (ok ? "ok" : "alerta");
 }
 
@@ -445,6 +516,38 @@ function desenhaConfig() {
   $("cfgPausaMax").value = c.pz.max / 60;
   $("cfgPausaN").value = c.pz.n;
   $("cfgQr").value = c.qr / 60;
+  $("cfgChave").placeholder = `atual: ${c.chave} (em branco = manter)`;
+  $("cfgNome").value = c.nome || "";
+  $("cfgCidade").value = c.cidade || "";
+  $("cfgBrilho").value = c.brilho ?? 100; $("vBrilho").textContent = $("cfgBrilho").value + "%";
+  $("cfgVolume").value = c.volume ?? 70; $("vVolume").textContent = $("cfgVolume").value + "%";
+  $("cfgEsc").value = c.esc ?? 1;
+  $("infoRede").textContent = c.rede ? `Principal: ${c.rede} (só muda na tela do terminal).` : "Sem rede principal na tela do terminal.";
+  const rd = $("cfgRedes");
+  rd.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const nome = (c.redes || [])[i] || "";
+    const d = document.createElement("div");
+    d.className = "op-linha";
+    d.style.gridTemplateColumns = "70px 1fr 1fr";
+    d.innerHTML = `<span class="suave">Reserva ${i + 1}</span>
+      <input data-rede="${i}" data-k="s" maxlength="32" placeholder="nome da rede" value="${nome.replace(/"/g, "&quot;")}" aria-label="Nome da rede reserva ${i + 1}">
+      <input data-rede="${i}" data-k="p" type="password" maxlength="64" placeholder="${nome ? "senha (em branco = manter)" : "senha"}" autocomplete="new-password" aria-label="Senha da rede reserva ${i + 1}">`;
+    rd.appendChild(d);
+  }
+  desenhaStatusCfg();
+}
+
+// "Pendente" ate o terminal devolver uma config com versao >= a enviada
+function desenhaStatusCfg() {
+  const st = $("cfgStatus"), v = (S.config && S.config.v) || 0;
+  if (S.cfgEnviada && v < S.cfgEnviada) {
+    st.textContent = "Pendente: enviada, aguardando o terminal aplicar (ele aplica sozinho quando estiver online).";
+    st.style.color = "var(--ambar)";
+  } else if (v) {
+    st.textContent = "Aplicada no terminal: configuração de " + new Date(v).toLocaleString("pt-BR");
+    st.style.color = "var(--verde)";
+  } else st.textContent = "";
 }
 
 function salvaConfig() {
@@ -454,11 +557,36 @@ function salvaConfig() {
     const i = +inp.dataset.op, v = parseFloat(inp.value) || 0;
     if (inp.dataset.k === "m") op[i][0] = Math.round(v); else op[i][1] = Math.round(v * 100);
   });
-  comando("config", {
-    modo: modoEdit, op,
+  const pin = $("cfgPin").value.trim();
+  if (pin && !/^\d{4,6}$/.test(pin)) { aviso("O PIN tem de 4 a 6 números", "erro"); return; }
+  const redes = [];
+  for (let i = 0; i < 3; i++) {
+    const ss = document.querySelector(`[data-rede="${i}"][data-k="s"]`).value.trim();
+    const pw = document.querySelector(`[data-rede="${i}"][data-k="p"]`).value;
+    if (ss) redes.push([ss, pw]);
+  }
+  const v = Date.now();                       // versao: a mais nova vence no terminal
+  const cfg = {
+    v, modo: modoEdit, op,
     pz: { on: $("cfgPausaOn").value === "1", max: Math.round(parseFloat($("cfgPausaMax").value) * 60), n: parseInt($("cfgPausaN").value, 10) },
     qr: Math.round(parseFloat($("cfgQr").value) * 60),
-  });
+    nome: $("cfgNome").value.trim(), cidade: $("cfgCidade").value.trim(),
+    brilho: +$("cfgBrilho").value, volume: +$("cfgVolume").value, esc: +$("cfgEsc").value, redes,
+  };
+  const chave = $("cfgChave").value.trim();
+  if (chave) cfg.chave = chave;
+  if (pin) cfg.pin = pin;
+  S.cfgEnviada = v;
+  lsSet("j48_cfgv_" + S.base, String(v));
+  // Canal 1 guarda retida (vale para quando o terminal reconectar); os dois canais levam agora
+  if (S.cli && S.cli.connected) {
+    const n = Math.random().toString(36).slice(2, 10);
+    cifra(Object.assign({ c: "config", t: Date.now(), n }, cfg)).then((corpo) => S.cli.publish(S.base + "/desejado", corpo, { qos: 1, retain: true }));
+  }
+  comando("config", cfg);
+  $("cfgPin").value = "";
+  document.querySelectorAll('#cfgRedes input[type="password"]').forEach((i) => (i.value = ""));
+  desenhaStatusCfg();
 }
 
 // ----------------------- Entrada / acoes -----------------------
@@ -467,6 +595,7 @@ async function entra(codigo, lembrar) {
   if (!window.crypto || !crypto.subtle) { $("erroLogin").textContent = "Abra o painel por https:// (ou como arquivo no PC)."; return; }
   if (typeof mqtt === "undefined") { $("erroLogin").textContent = "Não carregou a biblioteca MQTT. Confira a internet."; return; }
   await derivar(codigo);
+  S.cfgEnviada = +(lsGet("j48_cfgv_" + S.base) || 0);
   if (lembrar) lsSet("j48_codigo", norm(codigo));
   $("telaLogin").classList.add("oculto");
   $("telaPainel").classList.remove("oculto");
@@ -491,6 +620,9 @@ $("btnCancelarPag").onclick = () => comando("cancelar");
 $("mGratis").onclick = () => { modoEdit = "gratis"; pintaModo(); };
 $("mPix").onclick = () => { modoEdit = "pix"; pintaModo(); };
 $("btnSalvarCfg").onclick = salvaConfig;
+$("btnSom").onclick = () => comando("som");
+$("cfgBrilho").oninput = () => ($("vBrilho").textContent = $("cfgBrilho").value + "%");
+$("cfgVolume").oninput = () => ($("vVolume").textContent = $("cfgVolume").value + "%");
 $("btnMp").onclick = () => {
   const tk = $("mpToken").value.trim();
   if (!/^(APP_USR|TEST)-[\w-]{20,}$/.test(tk)) { aviso("O Access Token começa com APP_USR- (produção)", "erro"); return; }
