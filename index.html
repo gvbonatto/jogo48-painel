@@ -81,6 +81,8 @@
     display: flex; flex-direction: column; min-height: 0; }
   .cartao.cresce { flex: 1; }
   .cartao h2 { margin: 0 0 12px; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--suave); }
+  .cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .cab h2 { margin: 0; }
   .rola { overflow: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--borda) transparent; }
   footer { display: flex; align-items: center; gap: 12px; padding: 0 24px; color: var(--suave); font-size: 12px;
     border-top: 1px solid var(--borda); }
@@ -258,7 +260,10 @@
     <!-- ===== Coluna 2: vendas ===== -->
     <div class="coluna">
       <section class="cartao">
-        <h2>Vendas</h2>
+        <div class="cab">
+          <h2>Vendas</h2>
+          <button id="btnZerar" class="btn perigo peq" title="Zera os totais e o histórico de vendas do terminal">Zerar vendas</button>
+        </div>
         <div class="numeros">
           <div><span>Pix confirmados</span><b id="nPix" class="num">0</b></div>
           <div><span>Recebido</span><b id="vPix" class="num marca">R$ 0,00</b></div>
@@ -439,7 +444,7 @@ function conecta() {
       catch (e) { if (sub === "estado") aviso("Mensagem que não abre com este código. Confira o código do painel.", "erro"); return; }
       if (sub === "estado") recebeEstado(j);
       else if (sub === "config") recebeConfig(j);
-      else if (sub === "hist") recebeHist(j.h || []);
+      else if (sub === "hist") recebeHist(j);
       else if (sub === "evt") recebeResposta(j);
     });
     S.clis.push(cli);
@@ -448,11 +453,12 @@ function conecta() {
   setInterval(pollReserva, 15000);
 }
 
-// Historico retido nos dois servidores: fica o que tem a venda mais recente
-function recebeHist(h) {
-  const quando = (l) => (l.length && l[0][0]) || 0;
-  if (S.hist.length && quando(S.hist) > quando(h)) return;
-  S.hist = h; desenhaHist();
+// Historico retido nos dois servidores: fica o mais novo. "t" = quando mudou por
+// ultimo (venda ou zerado); terminal antigo nao manda "t": vale a venda mais recente
+function recebeHist(j) {
+  const h = j.h || [], t = j.t || (h.length && h[0][0]) || 0;
+  if (S.histT && t < S.histT) return;
+  S.histT = t; S.hist = h; desenhaHist();
 }
 function recebeEstado(j) {
   if (S.estado && S.estado.t && j.t && j.t < S.estado.t) return;   // o outro canal ja trouxe um mais novo
@@ -798,6 +804,9 @@ $("mGratis").onclick = () => { modoEdit = "gratis"; pintaModo(); };
 $("mPix").onclick = () => { modoEdit = "pix"; pintaModo(); };
 $("btnSalvarCfg").onclick = salvaConfig;
 $("btnSom").onclick = () => comando("som");
+$("btnZerar").onclick = () => {
+  if (confirm("Zerar os totais e o histórico de vendas do terminal? Não dá para desfazer.")) comando("zerar");
+};
 $("cfgBrilho").oninput = () => ($("vBrilho").textContent = $("cfgBrilho").value + "%");
 $("cfgVolume").oninput = () => ($("vVolume").textContent = $("cfgVolume").value + "%");
 $("btnMp").onclick = () => {
