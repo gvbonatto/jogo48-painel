@@ -3,230 +3,350 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0B1220">
-<title>Jogo de 48 · Painel</title>
+<meta name="theme-color" content="#120E0B">
+<title>Bonatto 48 · Painel</title>
+<link rel="icon" type="image/png" href="favicon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <!--
-  Painel online do terminal "Jogo de 48".
-  Fala com o terminal ESP32-P4 por MQTT (broker publico shiftr.io, TLS) e cifra tudo
-  com AES-256-GCM usando o codigo do painel mostrado na tela do terminal
-  (Operador > Online). Sem o codigo ninguem le nem comanda a maquina.
+  Painel online do terminal Bonatto 48 (mesmo visual da tela do terminal).
+  Fala com o terminal ESP32-P4 por MQTT (EMQX privado + shiftr.io publico) e, de
+  reserva, por HTTPS (ntfy.sh). Tudo cifrado com AES-256-GCM usando o codigo do
+  painel mostrado no terminal (Operador > Online): sem o codigo ninguem le nem comanda.
 -->
 <style>
   :root {
-    --fundo: #0B1220; --fundo2: #101C36; --cartao: #141E35; --cartao2: #1D2945; --borda: #2A3756;
-    --texto: #EAF0F8; --suave: #8C9DBA; --verde: #22C55E; --verde-esc: #052E16; --ciano: #38BDF8;
-    --ambar: #F59E0B; --ambar-esc: #3B2503; --vermelho: #EF4444; --raio: 18px;
+    --fundo: #120E0B; --cartao: #1C1612; --cartao2: #272019; --borda: #3A2E25;
+    --texto: #FFF5EE; --suave: #BFAA9A;
+    --marca: #FF6B00; --marca-forte: #E04E00; --marca-escura: #B83A00; --marca-tinta: #3B1F0F; --sobre-marca: #1A0A00;
+    --sucesso: #22C55E; --sucesso-fundo: #142415; --info: #38BDF8; --info-fundo: #162327;
+    --atencao: #FACC15; --atencao-fundo: #2B2306; --perigo: #EF4444; --perigo-fundo: #311613;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: linear-gradient(180deg, var(--fundo), var(--fundo2)) fixed; color: var(--texto);
-    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; min-height: 100%; }
-  body { padding: 0 16px 40px; }
-  main { max-width: 760px; margin: 0 auto; }
-  h1 { font-size: 1.25rem; margin: 0; letter-spacing: .01em; }
-  h2 { font-size: 1.05rem; margin: 0 0 12px; color: var(--suave); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
+    font: 15px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   button, input, select { font: inherit; color: inherit; }
-  button { cursor: pointer; border: 0; border-radius: 14px; padding: 12px 18px; font-weight: 700; background: var(--cartao2); }
-  button:disabled { opacity: .45; cursor: default; }
-  button.verde { background: var(--verde); color: var(--verde-esc); }
-  button.ambar { background: var(--ambar); color: var(--ambar-esc); }
-  button.ciano { background: var(--ciano); color: #062033; }
-  button.perigo { background: transparent; color: var(--vermelho); border: 2px solid var(--vermelho); }
-  button.fantasma { background: transparent; color: var(--suave); border: 1px solid var(--borda); }
-  input { background: var(--fundo); border: 1px solid var(--borda); border-radius: 12px; padding: 11px 12px; width: 100%; }
-  input:focus { outline: 2px solid var(--verde); outline-offset: 1px; }
-  .topo { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 14px 0; background: linear-gradient(180deg, var(--fundo) 70%, transparent); }
-  .topo .marca { display: flex; align-items: center; gap: 10px; margin-right: auto; }
-  .logo { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--verde-esc);
-    border: 2px solid var(--verde); color: var(--verde); font-weight: 800; }
-  .pilula { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 99px; font-size: .85rem;
-    font-weight: 600; background: var(--cartao2); color: var(--suave); white-space: nowrap; }
-  .pilula::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .pilula.ok { color: var(--verde); background: rgba(34,197,94,.12); }
-  .pilula.alerta { color: var(--ambar); background: rgba(245,158,11,.12); }
-  .pilula.erro { color: var(--vermelho); background: rgba(239,68,68,.12); }
-  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); padding: 18px; margin-bottom: 16px; }
-  .linha { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .num { font-variant-numeric: tabular-nums; }
   .suave { color: var(--suave); }
-  .pequeno { font-size: .85rem; }
+  .pequeno { font-size: 13px; }
   .oculto { display: none !important; }
-  /* Jogo */
-  .jogo { display: grid; grid-template-columns: 1fr; gap: 14px; }
-  .estado-jogo { font-size: 1rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .relogio { font-size: clamp(3.4rem, 15vw, 5.4rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; }
-  .barra { height: 12px; border-radius: 99px; background: var(--cartao2); overflow: hidden; }
-  .barra > div { height: 100%; width: 0; background: var(--verde); border-radius: 99px; transition: width .9s linear, background .3s; }
-  .aviso { border-radius: 14px; padding: 12px 14px; font-weight: 600; }
-  .aviso.erro { background: rgba(239,68,68,.12); border: 1px solid var(--vermelho); }
-  .aviso.ambar { background: rgba(245,158,11,.10); border: 1px solid var(--ambar); }
-  .opcoes button { flex: 1 1 110px; padding: 16px 10px; }
-  .opcoes button small { display: block; font-weight: 600; opacity: .8; }
-  /* Pagamento pendente */
-  .pendente { border-color: var(--ambar); background: linear-gradient(180deg, rgba(245,158,11,.10), var(--cartao)); }
-  .valor { font-size: 2.2rem; font-weight: 800; color: var(--verde); }
-  /* Vendas */
-  .numeros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
-  .numeros div { background: var(--cartao2); border-radius: 14px; padding: 12px; }
-  .numeros b { display: block; font-size: 1.35rem; }
-  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-  td, th { padding: 9px 6px; border-bottom: 1px solid var(--borda); text-align: left; }
-  th { color: var(--suave); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
-  .etiqueta { padding: 2px 9px; border-radius: 99px; font-size: .78rem; font-weight: 700; }
-  .etiqueta.pix { background: rgba(34,197,94,.15); color: var(--verde); }
-  .etiqueta.gratis { background: rgba(245,158,11,.15); color: var(--ambar); }
-  .etiqueta.remota { background: rgba(56,189,248,.15); color: var(--ciano); }
-  /* Config */
-  .campo { display: grid; gap: 6px; }
-  .campo label { color: var(--suave); font-size: .9rem; }
-  .op-linha { display: grid; grid-template-columns: 70px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
-  .alterna { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .alterna button.ativo.gratis { background: var(--ambar); color: var(--ambar-esc); }
-  .alterna button.ativo.pix { background: var(--verde); color: var(--verde-esc); }
-  /* Login */
-  .login { max-width: 440px; margin: 12vh auto 0; text-align: center; }
-  .login input { text-align: center; font-size: 1.25rem; letter-spacing: .12em; text-transform: uppercase; margin: 16px 0 10px; }
-  .login button { width: 100%; padding: 15px; }
-  /* Aviso flutuante */
-  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px); transition: transform .25s;
+
+  /* ---------- Botoes ---------- */
+  .btn { height: 44px; padding: 0 18px; border-radius: 14px; border: 0; font-weight: 700; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
+    transition: transform .05s, filter .15s; }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn:focus-visible, .aba:focus-visible, .chip:focus-visible { outline: 2px solid var(--marca); outline-offset: 2px; }
+  .btn.prim { background: linear-gradient(180deg, var(--marca), var(--marca-forte)); color: #fff; }
+  .btn.prim:hover { filter: brightness(1.08); }
+  .btn.sec { background: var(--cartao2); border: 1px solid var(--borda); }
+  .btn.sec:hover { border-color: var(--suave); }
+  .btn.fant { background: transparent; border: 1.5px solid var(--borda); }
+  .btn.fant:hover { border-color: var(--suave); }
+  .btn.perigo { background: transparent; border: 1.5px solid var(--perigo); color: var(--perigo); }
+  .btn.info { background: var(--info); color: #062033; }
+  .btn.peq { height: 36px; padding: 0 12px; font-size: 13px; border-radius: 12px; }
+
+  /* ---------- Campos ---------- */
+  input, select { background: var(--fundo); border: 1px solid var(--borda); border-radius: 12px; height: 40px; padding: 0 12px; width: 100%; }
+  input:focus, select:focus { outline: none; border-color: var(--marca); box-shadow: 0 0 0 1px var(--marca); }
+  input[type=range] { padding: 0; border: 0; height: 24px; accent-color: var(--marca); background: transparent; }
+  label { color: var(--suave); font-size: 13px; font-weight: 600; }
+  .campo { display: grid; gap: 5px; }
+
+  /* ---------- Selos ---------- */
+  .selo { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 99px; font-size: 13px;
+    font-weight: 700; background: var(--cartao2); color: var(--suave); white-space: nowrap; }
+  .selo::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .selo.ok { background: var(--sucesso-fundo); color: var(--sucesso); }
+  .selo.info { background: var(--info-fundo); color: var(--info); }
+  .selo.atencao { background: var(--atencao-fundo); color: var(--atencao); }
+  .selo.erro { background: var(--perigo-fundo); color: var(--perigo); }
+  .selo.grande { font-size: 15px; padding: 7px 16px; }
+
+  /* ---------- Estrutura: dashboard horizontal, tudo cabe sem rolar ---------- */
+  .app { height: 100vh; display: grid; grid-template-rows: 68px 1fr 36px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 0 24px; background: var(--cartao); border-bottom: 1px solid var(--borda); }
+  .marca { display: flex; align-items: center; gap: 12px; margin-right: auto; min-width: 0; }
+  .marca img { width: 44px; height: 44px; }
+  .marca h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+  .marca h1 span { color: var(--marca); }
+  .marca small { display: block; color: var(--suave); font-size: 12px; }
+  .dash { display: grid; grid-template-columns: minmax(330px, 1fr) minmax(300px, .9fr) minmax(400px, 1.15fr);
+    gap: 16px; padding: 16px 24px; min-height: 0; }
+  .coluna { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 20px; padding: 18px 20px;
+    display: flex; flex-direction: column; min-height: 0; }
+  .cartao.cresce { flex: 1; }
+  .cartao h2 { margin: 0 0 12px; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--suave); }
+  .rola { overflow: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--borda) transparent; }
+  footer { display: flex; align-items: center; gap: 12px; padding: 0 24px; color: var(--suave); font-size: 12px;
+    border-top: 1px solid var(--borda); }
+  footer .btn { margin-left: auto; height: 26px; font-size: 12px; padding: 0 10px; border-radius: 8px; }
+
+  /* ---------- Maquina ---------- */
+  /* O anel cresce com a tela (notebook ~180 px, Full HD 300 px) e o relogio junto */
+  .maquina { --anel: clamp(176px, 16vw, 300px); display: grid; grid-template-columns: var(--anel) 1fr; gap: 22px;
+    align-items: center; align-content: center; flex: 1; }
+  .anel { position: relative; width: var(--anel); height: var(--anel); }
+  .anel svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .anel circle { fill: none; stroke-width: 14; }
+  .anel .trilho { stroke: var(--cartao2); }
+  .anel .valor { stroke: var(--marca); stroke-linecap: round; transition: stroke-dashoffset .9s linear, stroke .3s, opacity .3s; }
+  .anel .meio { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  .relogio { font-size: calc(var(--anel) * .23); font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+  .lado { display: grid; gap: 10px; align-content: center; min-width: 0; }
+  .lado .acoes { flex-direction: column; }          /* coluna estreita: um botao embaixo do outro */
+  .selo.grande { white-space: normal; }
+  .aviso { border-radius: 14px; padding: 10px 12px; font-size: 13px; font-weight: 600; }
+  .aviso.erro { background: var(--perigo-fundo); border: 1px solid var(--perigo); }
+  .acoes { display: flex; gap: 8px; }
+  .acoes .btn { flex: 1; }
+  .chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+  .chip { border: 1px solid var(--borda); background: var(--cartao2); border-radius: 16px; padding: 10px 12px;
+    text-align: left; cursor: pointer; }
+  .chip:hover { border-color: var(--marca); }
+  .chip b { display: block; font-size: 18px; font-weight: 800; }
+  .chip span { color: var(--marca); font-weight: 700; font-size: 14px; }
+  .livre { display: flex; gap: 8px; margin-top: 10px; }
+
+  /* Pagamento esperando */
+  .pendente { border: 2px solid var(--marca-forte); background: linear-gradient(180deg, var(--marca-tinta), var(--cartao) 70%); }
+  .pend-topo { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  .pend-valor { font-size: 34px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
+
+  /* ---------- Vendas ---------- */
+  .numeros { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .numeros div { background: var(--cartao2); border-radius: 16px; padding: 12px 14px; }
+  .numeros span { color: var(--suave); font-size: 12px; font-weight: 600; }
+  .numeros b { display: block; font-size: 26px; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
+  .numeros b.marca { color: var(--marca); }
+  .hist { list-style: none; margin: 0; padding: 0; }
+  .hist li { display: grid; grid-template-columns: 1fr auto 60px 76px; gap: 10px; align-items: center;
+    padding: 9px 2px; border-bottom: 1px solid var(--borda); font-size: 14px; white-space: nowrap; }
+  .hist li:last-child { border-bottom: 0; }
+  .etiqueta { padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 700; }
+  .etiqueta.pix { background: var(--sucesso-fundo); color: var(--sucesso); }
+  .etiqueta.gratis { background: var(--atencao-fundo); color: var(--atencao); }
+  .etiqueta.remota { background: var(--info-fundo); color: var(--info); }
+
+  /* ---------- Configuracao (abas como o menu do terminal) ---------- */
+  .abas { display: flex; gap: 4px; padding: 4px; background: var(--fundo); border: 1px solid var(--borda); border-radius: 14px; margin-bottom: 14px; }
+  .aba { flex: 1; height: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--suave);
+    font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .aba.ativa { background: var(--marca-tinta); color: var(--marca); }
+  .painel-aba { display: grid; gap: 12px; align-content: start; }
+  .duas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .alterna { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--fundo);
+    border: 1px solid var(--borda); border-radius: 14px; }
+  .alterna button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--suave); font-weight: 700; cursor: pointer; }
+  .alterna button.ativo { background: var(--marca); color: var(--sobre-marca); }
+  .op-linha { display: grid; grid-template-columns: 74px 1fr 1fr; gap: 8px; align-items: center; }
+  .rodape-cfg { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--borda); }
+  .rodape-cfg p { margin: 0 auto 0 0; font-size: 13px; }
+
+  /* ---------- Login ---------- */
+  .login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+  .login .cartao { width: min(440px, 100%); text-align: center; padding: 32px 28px; }
+  .login img { width: 88px; height: 88px; margin: 0 auto 6px; }
+  .login h1 { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -.02em; }
+  .login h1 span { color: var(--marca); }
+  .login input { text-align: center; font-size: 20px; letter-spacing: .12em; text-transform: uppercase; height: 52px; margin: 18px 0 10px; }
+  .login .btn { width: 100%; height: 52px; font-size: 17px; margin-top: 8px; }
+
+  #toast { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%) translateY(140px); transition: transform .25s;
     background: var(--cartao2); border: 1px solid var(--borda); border-radius: 14px; padding: 12px 18px; font-weight: 600;
     max-width: calc(100% - 32px); z-index: 20; }
   #toast.mostra { transform: translateX(-50%) translateY(0); }
-  #toast.ok { border-color: var(--verde); }
-  #toast.erro { border-color: var(--vermelho); }
-  @media (min-width: 640px) { .jogo { grid-template-columns: 1.2fr 1fr; align-items: center; } }
+  #toast.ok { border-color: var(--sucesso); }
+  #toast.erro { border-color: var(--perigo); }
+
+  /* Tela menor que um notebook: duas colunas; celular: uma, rolando normal */
+  @media (max-width: 1180px) {
+    .dash { grid-template-columns: 1fr 1fr; }
+    .coluna.cfg { grid-column: 1 / -1; }
+    .app { height: auto; min-height: 100vh; }
+  }
+  @media (max-width: 760px) {
+    .dash { grid-template-columns: 1fr; padding: 12px; }
+    header { padding: 0 12px; flex-wrap: wrap; }
+    .maquina { grid-template-columns: 1fr; justify-items: center; }
+    .hist li { grid-template-columns: 1fr auto 56px 70px; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <!-- ======================= Login ======================= -->
-  <section id="telaLogin" class="login">
-    <div class="logo" style="margin:0 auto 14px;width:64px;height:64px;font-size:1.4rem">48</div>
-    <h1>Painel do Jogo de 48</h1>
-    <p class="suave">Digite o código do painel que aparece no terminal em<br><b>Operador › Online</b>.</p>
-    <input id="codigo" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="19">
-    <label class="suave pequeno"><input id="lembrar" type="checkbox" style="width:auto;margin-right:6px" checked>Lembrar neste aparelho</label>
-    <p><button id="entrar" class="verde">Entrar</button></p>
-    <p id="erroLogin" class="pequeno" style="color:var(--vermelho)"></p>
-  </section>
+<!-- ======================= Login ======================= -->
+<section id="telaLogin" class="login">
+  <div class="cartao">
+    <img src="logo_96.png" alt="Logo do Bonatto 48">
+    <h1>Bonatto <span>48</span></h1>
+    <p class="suave">Digite o código do painel que aparece no terminal em <b>Operador › Online</b>.</p>
+    <input id="codigo" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="19" aria-label="Código do painel">
+    <label><input id="lembrar" type="checkbox" style="width:auto;height:auto;margin-right:6px" checked>Lembrar neste aparelho</label>
+    <button id="entrar" class="btn prim">Entrar</button>
+    <p id="erroLogin" class="pequeno" style="color:var(--perigo);margin-bottom:0"></p>
+  </div>
+</section>
 
-  <!-- ======================= Painel ======================= -->
-  <section id="telaPainel" class="oculto">
-    <header class="topo">
-      <div class="marca"><div class="logo">48</div><div><h1>Jogo de 48</h1><span id="visto" class="suave pequeno">aguardando o terminal...</span></div></div>
-      <span id="pServidor" class="pilula alerta" title="Canal 1: MQTT (tempo real)">MQTT</span>
-      <span id="pReserva" class="pilula" title="Canal 2: HTTPS (reserva)">HTTPS</span>
-      <span id="pTerminal" class="pilula">Terminal</span>
-    </header>
+<!-- ======================= Painel ======================= -->
+<section id="telaPainel" class="app oculto">
+  <header>
+    <div class="marca">
+      <img src="logo_96.png" alt="">
+      <div><h1>Bonatto <span>48</span></h1><small id="visto">aguardando o terminal...</small></div>
+    </div>
+    <span id="pServidor" class="selo atencao" title="Canal 1: MQTT (tempo real)">MQTT</span>
+    <span id="pReserva" class="selo" title="Canal 2: HTTPS (reserva)">HTTPS</span>
+    <span id="pTerminal" class="selo">Terminal</span>
+  </header>
 
-    <!-- Pagamento esperando confirmacao -->
-    <section id="cPendente" class="cartao pendente oculto">
-      <h2 id="pendTitulo">Cliente aguardando o Pix</h2>
-      <div class="linha" style="justify-content:space-between">
-        <div><div id="pendValor" class="valor">R$ 0,00</div><div id="pendDesc" class="suave"></div></div>
-        <div class="suave pequeno" style="text-align:right">expira em<br><b id="pendExpira" style="font-size:1.4rem;color:var(--texto)">--:--</b></div>
-      </div>
-      <p id="pendDica" class="pequeno suave">Confira no app do banco se o Pix com esse valor chegou antes de confirmar.</p>
-      <div class="linha">
-        <button id="btnConfirmar" class="verde" style="flex:2">Confirmar recebimento</button>
-        <button id="btnCancelarPag" class="fantasma" style="flex:1">Cancelar</button>
-      </div>
-    </section>
-
-    <!-- Jogo -->
-    <section class="cartao">
-      <h2>Máquina</h2>
-      <div class="jogo">
-        <div>
-          <div id="estadoJogo" class="estado-jogo suave">—</div>
-          <div id="relogio" class="relogio">--:--</div>
-          <div class="barra" style="margin-top:12px"><div id="barra"></div></div>
-          <p id="infoJogo" class="suave pequeno" style="margin:8px 0 0"></p>
+  <main class="dash">
+    <!-- ===== Coluna 1: maquina e liberacao ===== -->
+    <div class="coluna">
+      <section id="cPendente" class="cartao pendente oculto" aria-live="polite">
+        <h2 id="pendTitulo">Cliente aguardando o Pix</h2>
+        <div class="pend-topo">
+          <div><div id="pendValor" class="pend-valor num">R$ 0,00</div><div id="pendDesc" class="suave pequeno"></div></div>
+          <div class="suave pequeno" style="text-align:right">expira em<br><b id="pendExpira" class="num" style="font-size:22px;color:var(--texto)">--:--</b></div>
         </div>
-        <div class="grade" style="grid-template-columns:1fr">
-          <div id="avisoRs" class="aviso erro oculto">Sem comunicação com o ESP32 do jogo. O tempo fica congelado até voltar.</div>
-          <div id="acoesJogo" class="linha">
-            <button id="btnPausa" class="ambar" style="flex:1">Pausar</button>
-            <button id="btnEncerrar" class="perigo" style="flex:1">Encerrar</button>
+        <p id="pendDica" class="pequeno suave" style="margin:8px 0"></p>
+        <div class="acoes">
+          <button id="btnConfirmar" class="btn prim" style="flex:2">Confirmar recebimento</button>
+          <button id="btnCancelarPag" class="btn fant">Cancelar</button>
+        </div>
+      </section>
+
+      <section class="cartao cresce">
+        <h2>Máquina</h2>
+        <div class="maquina">
+          <div class="anel" role="img" aria-label="Tempo restante">
+            <svg viewBox="0 0 196 196" aria-hidden="true">
+              <circle class="trilho" cx="98" cy="98" r="84"></circle>
+              <circle id="anelValor" class="valor" cx="98" cy="98" r="84" stroke-dasharray="527.8" stroke-dashoffset="527.8"></circle>
+            </svg>
+            <div class="meio">
+              <div id="relogio" class="relogio num" style="color:var(--suave)">00:00</div>
+              <div id="deTotal" class="suave pequeno num">tempo restante</div>
+            </div>
+          </div>
+          <div class="lado">
+            <div><span id="estadoJogo" class="selo grande">Aguardando</span></div>
+            <p id="infoJogo" class="suave pequeno" style="margin:0"></p>
+            <div id="avisoRs" class="aviso erro oculto">Sem comunicação com o ESP32 do jogo. O tempo fica parado até voltar.</div>
+            <div id="acoesJogo" class="acoes oculto">
+              <button id="btnPausa" class="btn sec">Pausar</button>
+              <button id="btnEncerrar" class="btn perigo">Encerrar</button>
+            </div>
           </div>
         </div>
-      </div>
-      <h2 id="tituloLiberar" style="margin-top:18px">Liberar jogo</h2>
-      <div id="opcoes" class="linha opcoes"></div>
-      <div class="linha" style="margin-top:10px">
-        <input id="minLivre" type="number" min="1" max="360" placeholder="Outro tempo (min)" style="flex:1;min-width:140px">
-        <button id="btnLivre" class="ciano">Liberar</button>
-      </div>
-      <p class="suave pequeno" style="margin-bottom:0">Liberação pelo painel não cobra nada: ela entra nas vendas como "painel".</p>
-    </section>
+      </section>
 
-    <!-- Vendas -->
-    <section class="cartao">
-      <h2>Vendas</h2>
-      <div class="numeros">
-        <div><span class="suave pequeno">Pix</span><b id="nPix">0</b><span id="vPix" class="suave pequeno">R$ 0,00</span></div>
-        <div><span class="suave pequeno">Grátis (teste)</span><b id="nGratis">0</b></div>
-        <div><span class="suave pequeno">Tempo liberado</span><b id="nTempo">0 min</b></div>
-      </div>
-      <table><thead><tr><th>Quando</th><th>Tipo</th><th>Tempo</th><th>Valor</th></tr></thead><tbody id="historico"></tbody></table>
-      <p id="semHist" class="suave pequeno">Nenhuma venda ainda.</p>
-    </section>
+      <section class="cartao">
+        <h2 id="tituloLiberar">Liberar jogo</h2>
+        <div id="opcoes" class="chips"></div>
+        <div class="livre">
+          <input id="minLivre" type="number" min="1" max="360" placeholder="Outro tempo (min)" aria-label="Outro tempo em minutos">
+          <button id="btnLivre" class="btn info">Liberar</button>
+        </div>
+        <p class="suave pequeno" style="margin:8px 0 0">Liberação pelo painel não cobra nada: entra nas vendas como "painel".</p>
+      </section>
+    </div>
 
-    <!-- Configuracao -->
-    <section class="cartao">
-      <h2>Configuração</h2>
-      <div class="campo"><label>Modo de venda</label>
-        <div class="alterna"><button id="mGratis" class="gratis">Grátis (teste)</button><button id="mPix" class="pix">Pix</button></div></div>
-      <p class="suave pequeno" id="infoPix"></p>
-      <div class="campo" style="margin-top:6px"><label>Opções de tempo (0 min = desligada)</label>
-        <div id="cfgOpcoes"></div></div>
-      <div class="grade" style="margin-top:8px">
-        <div class="campo"><label>Pausa</label><select id="cfgPausaOn" style="background:var(--fundo);border:1px solid var(--borda);border-radius:12px;padding:11px"><option value="1">Permitida</option><option value="0">Desligada</option></select></div>
-        <div class="campo"><label>Duração máx. da pausa (min)</label><input id="cfgPausaMax" type="number" min="0.5" max="30" step="0.5"></div>
-        <div class="campo"><label>Pausas por jogo</label><input id="cfgPausaN" type="number" min="1" max="10"></div>
-        <div class="campo"><label>Validade do QR (min)</label><input id="cfgQr" type="number" min="1" max="15" step="0.5"></div>
-      </div>
-      <div class="grade" style="margin-top:8px">
-        <div class="campo"><label>Chave Pix (QR sem Mercado Pago)</label><input id="cfgChave" placeholder="em branco = manter" autocomplete="off"></div>
-        <div class="campo"><label>Nome do recebedor</label><input id="cfgNome" maxlength="25"></div>
-        <div class="campo"><label>Cidade</label><input id="cfgCidade" maxlength="15"></div>
-        <div class="campo"><label>Novo PIN do operador</label><input id="cfgPin" type="password" inputmode="numeric" maxlength="6" placeholder="em branco = manter" autocomplete="new-password"></div>
-        <div class="campo"><label>Brilho da tela: <b id="vBrilho"></b></label><input id="cfgBrilho" type="range" min="10" max="100"></div>
-        <div class="campo"><label>Volume do alerta: <b id="vVolume"></b></label><input id="cfgVolume" type="range" min="0" max="100"></div>
-        <div class="campo"><label>ID do escravo Modbus</label><input id="cfgEsc" type="number" min="1" max="247"></div>
-      </div>
-      <div class="campo" style="margin-top:12px"><label>Redes Wi-Fi reserva (o terminal troca sozinho se a principal cair)</label>
-        <p class="suave pequeno" style="margin:0" id="infoRede"></p>
-        <div id="cfgRedes"></div></div>
-      <p id="cfgStatus" class="pequeno" style="margin:12px 0 0"></p>
-      <div class="linha" style="margin-top:10px">
-        <button id="btnSalvarCfg" class="verde" style="flex:2">Salvar no terminal</button>
-        <button id="btnSom" class="fantasma" style="flex:1">Testar alerta</button>
-      </div>
-      <p class="suave pequeno" style="margin-bottom:0">A configuração fica guardada nos dois servidores: se o terminal estiver
-        desligado ou sem internet, ela é aplicada assim que ele voltar (até 12 h pelo canal reserva).</p>
-    </section>
+    <!-- ===== Coluna 2: vendas ===== -->
+    <div class="coluna">
+      <section class="cartao">
+        <h2>Vendas</h2>
+        <div class="numeros">
+          <div><span>Pix confirmados</span><b id="nPix" class="num">0</b></div>
+          <div><span>Recebido</span><b id="vPix" class="num marca">R$ 0,00</b></div>
+          <div><span>Liberações grátis</span><b id="nGratis" class="num">0</b></div>
+          <div><span>Tempo liberado</span><b id="nTempo" class="num">0 min</b></div>
+        </div>
+      </section>
+      <section class="cartao cresce">
+        <h2>Últimas vendas</h2>
+        <div class="rola"><ul id="historico" class="hist"></ul>
+          <p id="semHist" class="suave pequeno">Nenhuma venda ainda.</p></div>
+      </section>
+    </div>
 
-    <!-- Mercado Pago -->
-    <section class="cartao">
-      <h2>Mercado Pago · Pix automático</h2>
-      <p id="mpStatus" class="suave" style="margin-top:0"></p>
-      <div class="linha">
-        <input id="mpToken" type="password" placeholder="Cole o Access Token (APP_USR-...)" autocomplete="off" spellcheck="false" style="flex:1;min-width:200px">
-        <button id="btnMp" class="ciano">Enviar</button>
-      </div>
-      <p class="suave pequeno">Pegue em mercadopago.com.br/developers › Suas integrações › Credenciais de produção.
-        O token vai cifrado direto para o terminal e não fica salvo neste aparelho.</p>
-      <button id="btnMpRemover" class="fantasma pequeno">Remover token do terminal</button>
-    </section>
+    <!-- ===== Coluna 3: configuracao ===== -->
+    <div class="coluna cfg">
+      <section class="cartao cresce">
+        <h2>Configuração</h2>
+        <div class="abas" role="tablist">
+          <button class="aba ativa" data-aba="venda" role="tab">Venda</button>
+          <button class="aba" data-aba="tempos" role="tab">Tempos</button>
+          <button class="aba" data-aba="maquina" role="tab">Máquina</button>
+          <button class="aba" data-aba="wifi" role="tab">Wi-Fi</button>
+          <button class="aba" data-aba="mp" role="tab">Mercado Pago</button>
+        </div>
 
-    <section class="suave pequeno" style="text-align:center">
-      <p id="infoTecnica"></p>
-      <button id="sair" class="fantasma">Sair deste aparelho</button>
-    </section>
-  </section>
-</main>
-<div id="toast"></div>
+        <div class="rola" style="flex:1">
+          <div class="painel-aba" data-painel="venda">
+            <div class="campo"><label>Modo de venda</label>
+              <div class="alterna"><button id="mGratis">Teste grátis</button><button id="mPix">Pix</button></div></div>
+            <p id="infoPix" class="suave pequeno" style="margin:0"></p>
+            <div class="duas">
+              <div class="campo"><label for="cfgNome">Nome do recebedor</label><input id="cfgNome" maxlength="25"></div>
+              <div class="campo"><label for="cfgCidade">Cidade</label><input id="cfgCidade" maxlength="15"></div>
+            </div>
+            <div class="campo"><label for="cfgChave">Chave Pix</label><input id="cfgChave" placeholder="em branco = manter" autocomplete="off"></div>
+            <div class="campo"><label for="cfgPin">Novo PIN do operador</label><input id="cfgPin" type="password" inputmode="numeric" maxlength="6" placeholder="em branco = manter" autocomplete="new-password"></div>
+          </div>
+
+          <div class="painel-aba oculto" data-painel="tempos">
+            <div class="campo"><label>Opções de tempo · minutos e preço (0 min = escondida)</label><div id="cfgOpcoes" style="display:grid;gap:8px"></div></div>
+            <div class="duas">
+              <div class="campo"><label for="cfgPausaOn">Pausa</label><select id="cfgPausaOn"><option value="1">Permitida</option><option value="0">Desligada</option></select></div>
+              <div class="campo"><label for="cfgPausaN">Pausas por jogo</label><input id="cfgPausaN" type="number" min="1" max="10"></div>
+              <div class="campo"><label for="cfgPausaMax">Duração máx. da pausa (min)</label><input id="cfgPausaMax" type="number" min="0.5" max="30" step="0.5"></div>
+              <div class="campo"><label for="cfgQr">Validade do QR (min)</label><input id="cfgQr" type="number" min="1" max="15" step="0.5"></div>
+            </div>
+          </div>
+
+          <div class="painel-aba oculto" data-painel="maquina">
+            <div class="campo"><label for="cfgBrilho">Brilho da tela: <b id="vBrilho"></b></label><input id="cfgBrilho" type="range" min="10" max="100"></div>
+            <div class="campo"><label for="cfgVolume">Volume (alertas, pagamento e cliques): <b id="vVolume"></b></label><input id="cfgVolume" type="range" min="0" max="100"></div>
+            <div class="duas" style="align-items:end">
+              <div class="campo"><label for="cfgEsc">ID do escravo Modbus</label><input id="cfgEsc" type="number" min="1" max="247"></div>
+              <button id="btnSom" class="btn sec">Testar alerta no terminal</button>
+            </div>
+          </div>
+
+          <div class="painel-aba oculto" data-painel="wifi">
+            <p id="infoRede" class="suave pequeno" style="margin:0"></p>
+            <div class="campo"><label>Redes reserva: o terminal troca sozinho se a principal cair</label><div id="cfgRedes" style="display:grid;gap:8px"></div></div>
+          </div>
+
+          <div class="painel-aba oculto" data-painel="mp">
+            <p id="mpStatus" class="suave" style="margin:0"></p>
+            <div class="campo"><label for="mpToken">Access Token de produção</label>
+              <div class="acoes"><input id="mpToken" type="password" placeholder="APP_USR-..." autocomplete="off" spellcheck="false">
+                <button id="btnMp" class="btn info" style="flex:0 0 auto">Enviar</button></div></div>
+            <p class="suave pequeno" style="margin:0">Pegue em mercadopago.com.br/developers › Suas integrações › Credenciais de produção.
+              O token vai cifrado direto para o terminal e não fica salvo neste aparelho.</p>
+            <div><button id="btnMpRemover" class="btn fant peq">Remover token do terminal</button></div>
+          </div>
+        </div>
+
+        <div class="rodape-cfg">
+          <p id="cfgStatus"></p>
+          <button id="btnSalvarCfg" class="btn prim">Salvar no terminal</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <span id="infoTecnica"></span>
+    <button id="sair" class="btn fant">Sair deste aparelho</button>
+  </footer>
+</section>
+<div id="toast" role="status"></div>
 
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
@@ -243,6 +363,7 @@ const NTFY = "https://ntfy.sh/";                 // canal 2 (reserva): HTTPS pur
 const S = { key: null, base: null, clis: [], estado: null, estadoEm: 0, config: null, hist: [], vivo: null, vivoPor: {},
             pend: {}, ntfyCmd: "", ntfyEst: "", ntfyUltimo: "", reservaOk: null, cfgEnviada: 0, mqttUser: "", mqttSenha: "" };
 const mqttConectados = () => S.clis.filter((c) => c.connected);
+const CIRC = 2 * Math.PI * 84;                    // anel do tempo (r = 84)
 
 // ----------------------- Util -----------------------
 const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
@@ -333,7 +454,6 @@ function recebeHist(h) {
   if (S.hist.length && quando(S.hist) > quando(h)) return;
   S.hist = h; desenhaHist();
 }
-
 function recebeEstado(j) {
   if (S.estado && S.estado.t && j.t && j.t < S.estado.t) return;   // o outro canal ja trouxe um mais novo
   S.estado = j; S.estadoEm = Date.now(); desenhaEstado();
@@ -391,28 +511,30 @@ async function comando(c, extra = {}, avisar = true) {
 // ----------------------- Desenho -----------------------
 function marcaReserva(ok) {
   S.reservaOk = ok;
-  const p = $("pReserva");
-  p.className = "pilula " + (ok ? "ok" : "alerta");
+  $("pReserva").className = "selo " + (ok ? "ok" : "atencao");
 }
 function marcaServidor() {
   const ligados = mqttConectados().length, ok = ligados > 0;
   const p = $("pServidor");
   p.textContent = ok ? `MQTT ${ligados}/${BROKERS.length}` : "MQTT...";
-  p.className = "pilula " + (ok ? "ok" : "alerta");
+  p.className = "selo " + (ok ? "ok" : "atencao");
 }
 
+// Online = estado recebido ha pouco E feito ha pouco. Mensagem guardada (retida no
+// servidor ou no cache do canal reserva) chega agora mas pode ser de horas atras: a
+// hora dela manda, com 10 min de folga para relogio de celular adiantado/atrasado
 function terminalOnline() {
   if (!S.estado) return false;
   if (S.vivo === false) return false;
+  if (Date.now() - S.estadoEm >= 35000) return false;
   const t = S.estado.t;
-  if (t) return Math.abs(Date.now() - t * 1000) < 35000 || Date.now() - S.estadoEm < 35000;
-  return Date.now() - S.estadoEm < 35000;
+  return !t || Math.abs(Date.now() - t * 1000) < 600000;
 }
 
 function desenhaTerminal() {
   const on = terminalOnline(), p = $("pTerminal");
   p.textContent = on ? "Terminal online" : "Terminal offline";
-  p.className = "pilula " + (on ? "ok" : "erro");
+  p.className = "selo " + (on ? "ok" : "erro");
   if (S.estado) {
     const quando = S.estado.t ? S.estado.t * 1000 : S.estadoEm;
     const seg = Math.max(0, Math.round((Date.now() - quando) / 1000));
@@ -428,31 +550,29 @@ function restanteAgora() {
   return Math.max(0, r);
 }
 
-const NOMES = { livre: "Livre · esperando cliente", jogando: "Jogando", pausada: "Pausado", encerrada: "Tempo esgotado" };
+const NOMES = { livre: "Livre", jogando: "Jogando", pausada: "Pausado", encerrada: "Tempo esgotado" };
 function desenhaEstado() {
   const e = S.estado;
   if (!e) return;
   const j = e.jogo, emJogo = j.e === "jogando" || j.e === "pausada";
   desenhaTerminal();
 
-  const est = $("estadoJogo");
-  est.textContent = j.cg ? "Tempo congelado" : NOMES[j.e] || j.e;
-  est.style.color = j.cg ? "var(--vermelho)" : j.e === "jogando" ? "var(--verde)" : j.e === "pausada" ? "var(--ciano)" : "var(--suave)";
   $("avisoRs").classList.toggle("oculto", e.rs.on);
   $("acoesJogo").classList.toggle("oculto", !emJogo);
-  $("btnPausa").textContent = j.e === "pausada" ? "Retomar" : j.pr > 0 ? `Pausar (${j.pr})` : "Sem pausas";
-  $("btnPausa").className = j.e === "pausada" ? "ciano" : "ambar";
-  $("btnPausa").disabled = j.e !== "pausada" && !(j.pr > 0);
+  const bp = $("btnPausa");
+  bp.textContent = j.e === "pausada" ? "Retomar" : j.pr > 0 ? `Pausar (${j.pr})` : "Sem pausas";
+  bp.className = "btn " + (j.e === "pausada" ? "info" : "sec");
+  bp.disabled = j.e !== "pausada" && !(j.pr > 0);
   $("tituloLiberar").textContent = emJogo ? "Adicionar tempo" : "Liberar jogo";
   $("infoJogo").textContent = j.e === "pausada" ? `Volta sozinho em ${mmss(j.pz)}` :
-    emJogo ? `${j.pr} pausa(s) disponível(is)` : "";
+    emJogo ? `${j.pr} pausa(s) disponível(is)` : j.e === "livre" ? "Esperando cliente" : "";
 
   // Pagamento esperando na tela do terminal
   const pg = e.pag;
   $("cPendente").classList.toggle("oculto", !pg);
   if (pg) {
     $("pendTitulo").textContent = !pg.pix ? "Cliente na tela de teste grátis" :
-      pg.au ? "Cliente pagando com Pix · confirmação automática" : "Cliente aguardando o Pix";
+      pg.au ? "Cliente pagando com Pix · confirma sozinho" : "Cliente aguardando o Pix";
     $("pendValor").textContent = pg.pix ? reais(pg.c) : "R$ 0,00";
     $("pendDesc").textContent = `${Math.round(pg.s / 60)} min ${pg.ex ? "a mais" : "de jogo"} · ref ${pg.tx}`;
     $("pendDica").classList.toggle("oculto", !pg.pix);
@@ -467,19 +587,34 @@ function desenhaEstado() {
   $("nGratis").textContent = e.vd.gr;
   const min = Math.round(e.vd.seg / 60);
   $("nTempo").textContent = min >= 60 ? `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}` : `${min} min`;
-  $("infoTecnica").textContent = `${e.fw} · ligado há ${Math.round(e.up / 60)} min · Wi-Fi ${e.wifi.rssi} dBm (${e.wifi.ip}) · RS485 ${e.rs.ok} ok / ${e.rs.f} falhas`;
+  const srv = e.canais && e.canais.srv ? ` · servidor ${e.canais.srv}` : "";
+  $("infoTecnica").textContent = `${e.fw} · ligado há ${Math.round(e.up / 60)} min · Wi-Fi ${e.wifi.ssid || ""} ${e.wifi.rssi} dBm${srv} · RS485 ${e.rs.ok} ok / ${e.rs.f} falhas`;
   tique();
 }
 
+// A cada segundo: relogio, anel e selo de estado (mesmas cores da tela do terminal)
 function tique() {
   const e = S.estado;
   if (!e) return;
-  const r = restanteAgora();
-  $("relogio").textContent = e.jogo.e === "livre" ? "--:--" : mmss(r);
-  const tot = e.jogo.tot || 1;
-  const barra = $("barra");
-  barra.style.width = (e.jogo.e === "livre" ? 0 : Math.min(100, (r / tot) * 100)) + "%";
-  barra.style.background = e.jogo.cg ? "var(--vermelho)" : e.jogo.e === "pausada" ? "var(--ciano)" : r <= 60 ? "var(--ambar)" : "var(--verde)";
+  const j = e.jogo, r = restanteAgora(), livre = j.e === "livre";
+  $("relogio").textContent = mmss(livre ? 0 : r);
+  $("deTotal").textContent = livre ? "tempo restante" : j.e === "pausada" ? "jogo pausado" : `de ${mmss(j.tot || 0)}`;
+  const tot = j.tot || 1, frac = livre ? 0 : Math.min(1, r / tot);
+  const anel = $("anelValor");
+  anel.style.strokeDashoffset = String(CIRC * (1 - frac));
+  anel.style.opacity = frac > 0 ? 1 : 0;           // arco vazio com ponta redonda viraria um ponto
+  let cor = "var(--marca)", cls = "ok", txt = NOMES[j.e] || j.e;
+  if (j.cg) { cor = "var(--suave)"; cls = "erro"; txt = "Sem comunicação"; }
+  else if (j.e === "pausada") { cor = "var(--info)"; cls = "info"; }
+  else if (j.e === "jogando" && r <= 30) { cor = "var(--perigo)"; cls = "atencao"; txt = "Tempo acabando"; }
+  else if (j.e === "jogando" && r <= 90) { cor = "var(--atencao)"; cls = "atencao"; txt = "Tempo acabando"; }
+  else if (j.e !== "jogando") cls = "";
+  anel.style.stroke = cor;
+  $("relogio").style.color = livre ? "var(--suave)" : j.e === "jogando" && r <= 90 && !j.cg ? cor :
+    j.e === "pausada" ? "var(--info)" : "var(--texto)";
+  const est = $("estadoJogo");
+  est.textContent = txt;
+  est.className = "selo grande " + cls;
   if (e.pag) $("pendExpira").textContent = mmss((S.pendExpira - Date.now()) / 1000);
   desenhaTerminal();
 }
@@ -489,8 +624,8 @@ function desenhaOpcoes() {
   box.innerHTML = "";
   (S.config ? S.config.op : []).filter((o) => o[0] > 0).forEach(([m, c]) => {
     const b = document.createElement("button");
-    b.className = "verde";
-    b.innerHTML = `${m} min<small>${S.config.modo === "pix" ? "vale " + reais(c) : "grátis"}</small>`;
+    b.className = "chip";
+    b.innerHTML = `<b>${m} min</b><span>${S.config.modo === "pix" ? reais(c) : "grátis"}</span>`;
     b.onclick = () => libera(m);
     box.appendChild(b);
   });
@@ -504,16 +639,17 @@ function libera(min) {
 
 const TIPOS = [["pix", "Pix"], ["gratis", "Grátis"], ["remota", "Painel"]];
 function desenhaHist() {
-  const tb = $("historico");
-  tb.innerHTML = "";
+  const ul = $("historico");
+  ul.innerHTML = "";
   $("semHist").classList.toggle("oculto", S.hist.length > 0);
   for (const [quando, cent, seg, tipo, tx] of S.hist) {
     const [cls, nome] = TIPOS[tipo] || ["", "?"];
-    const tr = document.createElement("tr");
-    const data = quando ? new Date(quando * 1000).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
-    tr.innerHTML = `<td>${data}</td><td><span class="etiqueta ${cls}">${nome}</span></td><td>${Math.round(seg / 60)} min</td><td>${cent ? reais(cent) : "—"}</td>`;
-    tr.title = tx;
-    tb.appendChild(tr);
+    const li = document.createElement("li");
+    const d = new Date(quando * 1000), dd = (x) => String(x).padStart(2, "0");
+    const data = quando ? `${dd(d.getDate())}/${dd(d.getMonth() + 1)} ${dd(d.getHours())}:${dd(d.getMinutes())}` : "—";
+    li.innerHTML = `<span class="num">${data}</span><span class="etiqueta ${cls}">${nome}</span><span class="num suave">${Math.round(seg / 60)} min</span><b class="num" style="text-align:right">${cent ? reais(cent) : "—"}</b>`;
+    li.title = tx;
+    ul.appendChild(li);
   }
 }
 
@@ -527,19 +663,19 @@ function desenhaConfig() {
   if (!c) return;
   modoEdit = c.modo;
   pintaModo();
-  $("infoPix").textContent = c.mp ? "Pix pelo Mercado Pago: cada venda gera um QR único e libera sozinho." :
-    `Pix para ${c.nome} · chave ${c.chave}, confirmado pelo operador (a chave só muda no terminal).`;
+  $("infoPix").textContent = c.mp ? "Cada venda gera um Pix único pelo Mercado Pago e o jogo libera sozinho." :
+    "Sem o token do Mercado Pago o terminal não vende no Pix (envie na aba Mercado Pago).";
   const mp = $("mpStatus");
   mp.textContent = c.mp ? `Configurado (${c.mp}). O jogo libera sozinho quando o Pix cai.`
-                        : "Não configurado: o Pix usa a chave do terminal e precisa de confirmação manual.";
-  mp.style.color = c.mp ? "var(--verde)" : "var(--suave)";
+                        : "Não configurado: sem ele o terminal não vende no Pix.";
+  mp.style.color = c.mp ? "var(--sucesso)" : "var(--suave)";
   $("btnMpRemover").classList.toggle("oculto", !c.mp);
   const box = $("cfgOpcoes");
   box.innerHTML = "";
   c.op.forEach(([m, cent], i) => {
     const d = document.createElement("div");
     d.className = "op-linha";
-    d.innerHTML = `<span class="suave">Opção ${i + 1}</span>
+    d.innerHTML = `<span class="suave pequeno">Opção ${i + 1}</span>
       <input type="number" min="0" max="600" step="5" value="${m}" data-op="${i}" data-k="m" aria-label="Minutos da opção ${i + 1}">
       <input type="number" min="0" max="1000" step="0.5" value="${(cent / 100).toFixed(2)}" data-op="${i}" data-k="c" aria-label="Preço da opção ${i + 1} em reais">`;
     box.appendChild(d);
@@ -554,15 +690,14 @@ function desenhaConfig() {
   $("cfgBrilho").value = c.brilho ?? 100; $("vBrilho").textContent = $("cfgBrilho").value + "%";
   $("cfgVolume").value = c.volume ?? 70; $("vVolume").textContent = $("cfgVolume").value + "%";
   $("cfgEsc").value = c.esc ?? 1;
-  $("infoRede").textContent = c.rede ? `Principal: ${c.rede} (só muda na tela do terminal).` : "Sem rede principal na tela do terminal.";
+  $("infoRede").textContent = c.rede ? `Rede principal: ${c.rede} (só muda na tela do terminal).` : "Sem rede principal na tela do terminal.";
   const rd = $("cfgRedes");
   rd.innerHTML = "";
   for (let i = 0; i < 3; i++) {
     const nome = (c.redes || [])[i] || "";
     const d = document.createElement("div");
     d.className = "op-linha";
-    d.style.gridTemplateColumns = "70px 1fr 1fr";
-    d.innerHTML = `<span class="suave">Reserva ${i + 1}</span>
+    d.innerHTML = `<span class="suave pequeno">Reserva ${i + 1}</span>
       <input data-rede="${i}" data-k="s" maxlength="32" placeholder="nome da rede" value="${nome.replace(/"/g, "&quot;")}" aria-label="Nome da rede reserva ${i + 1}">
       <input data-rede="${i}" data-k="p" type="password" maxlength="64" placeholder="${nome ? "senha (em branco = manter)" : "senha"}" autocomplete="new-password" aria-label="Senha da rede reserva ${i + 1}">`;
     rd.appendChild(d);
@@ -574,11 +709,11 @@ function desenhaConfig() {
 function desenhaStatusCfg() {
   const st = $("cfgStatus"), v = (S.config && S.config.v) || 0;
   if (S.cfgEnviada && v < S.cfgEnviada) {
-    st.textContent = "Pendente: enviada, aguardando o terminal aplicar (ele aplica sozinho quando estiver online).";
-    st.style.color = "var(--ambar)";
+    st.textContent = "Pendente: o terminal aplica sozinho quando estiver online.";
+    st.style.color = "var(--atencao)";
   } else if (v) {
-    st.textContent = "Aplicada no terminal: configuração de " + new Date(v).toLocaleString("pt-BR");
-    st.style.color = "var(--verde)";
+    st.textContent = "Aplicada no terminal em " + new Date(v).toLocaleString("pt-BR");
+    st.style.color = "var(--sucesso)";
   } else st.textContent = "";
 }
 
@@ -623,6 +758,14 @@ function salvaConfig() {
   desenhaStatusCfg();
 }
 
+// ----------------------- Abas da configuracao -----------------------
+document.querySelectorAll(".aba").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll(".aba").forEach((x) => x.classList.toggle("ativa", x === b));
+    document.querySelectorAll(".painel-aba").forEach((p) => p.classList.toggle("oculto", p.dataset.painel !== b.dataset.aba));
+  };
+});
+
 // ----------------------- Entrada / acoes -----------------------
 async function entra(codigo, lembrar) {
   if (norm(codigo).length !== 16) { $("erroLogin").textContent = "O código tem 16 letras e números."; return; }
@@ -664,7 +807,7 @@ $("btnMp").onclick = () => {
   comando("mptoken", { tk });
   $("mpToken").value = "";
 };
-$("btnMpRemover").onclick = () => { if (confirm("Remover o token? O Pix volta a precisar de confirmação manual.")) comando("mptoken", { tk: "" }); };
+$("btnMpRemover").onclick = () => { if (confirm("Remover o token? Sem ele o terminal não vende no Pix.")) comando("mptoken", { tk: "" }); };
 setInterval(tique, 1000);
 
 // Codigo pela URL (#k=XXXX...) ou lembrado neste aparelho
